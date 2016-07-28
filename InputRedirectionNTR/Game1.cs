@@ -4,9 +4,8 @@ using Microsoft.Xna.Framework.Input;
 using System;
 using System.IO;
 using System.Net;
-using System.Net.Sockets;
 
-namespace InputRedirection
+namespace InputRedirectionNTR
 {
     public class Game1 : Game
     {
@@ -14,8 +13,6 @@ namespace InputRedirection
         SpriteBatch spriteBatch;
         Texture2D Font;
         Texture2D Cursor;
-
-        Socket socket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, 0);
         IPAddress ipAddress;
         string IPAddress = "192.168.1.2";
         byte[] data = new byte[12];
@@ -41,6 +38,7 @@ namespace InputRedirection
         uint KeyIndex;
         Keys OldKey;
         uint OldButton;
+        uint seconds = 0;
         bool useGamePad = true;
         string version = "0";
 
@@ -82,7 +80,13 @@ namespace InputRedirection
 
         protected override void Update(GameTime gameTime)
         {
-            CheckConnection();
+            if (gameTime.TotalGameTime.TotalSeconds != seconds)
+            {
+                seconds = (uint)gameTime.TotalGameTime.TotalSeconds;
+                Program.ntrClient.sendHeartbeatPacket();
+
+            }
+
             switch (Mode)
             {
                 case 0:
@@ -171,6 +175,11 @@ namespace InputRedirection
             base.Draw(gameTime);
         }
 
+        protected override void OnExiting(Object sender, EventArgs args)
+        {
+            Program.scriptHelper.disconnect();
+        }
+
         private void ReadConfig()
         {
             StreamReader sr = new StreamReader("config.cfg");
@@ -230,11 +239,10 @@ namespace InputRedirection
 
         private void CheckConnection()
         {
-            if (!socket.Connected)
+            if (!Program.Connected)
             {
-                socket.Connect(IPAddress, 4950);
+                Program.scriptHelper.connect(IPAddress, 8000);
             }
-
         }
 
         private void ReadNewKey()
@@ -243,7 +251,7 @@ namespace InputRedirection
             {
                 keyboardState = Keyboard.GetState();
 
-                if(keyboardState.GetPressedKeys().Length > 0)
+                if (keyboardState.GetPressedKeys().Length > 0)
                 {
                     switch (keyboardState.GetPressedKeys()[0])
                     {
@@ -308,14 +316,17 @@ namespace InputRedirection
                         {
                             case Keys.Escape:
                                 {
-                                    GamePadInput[KeyIndex] = OldButton;
-                                    Mode = 3;
+                                    if (System.Net.IPAddress.TryParse(IPAddress, out ipAddress))
+                                    {
+                                        GamePadInput[KeyIndex] = OldButton;
+                                        Mode = 3;
+                                    }
                                 }
                                 break;
 
                             default:
                                 {
-                                    switch(buttonKeysToCheck[i])
+                                    switch (buttonKeysToCheck[i])
                                     {
                                         case Keys.A:
                                             {
@@ -682,9 +693,7 @@ namespace InputRedirection
                                         Mode = 0;
                                         IPAddress = ipAddress.ToString();
                                         SaveConfig();
-                                        socket.Close();
-                                        socket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, 0);
-
+                                        Program.scriptHelper.disconnect();
                                     }
                                 }
                                 break;
@@ -748,7 +757,7 @@ namespace InputRedirection
         {
             if (!WaitForKeyUp)
             {
-                if(GamePad.GetState(PlayerIndex.One).Buttons.B == ButtonState.Pressed)
+                if (GamePad.GetState(PlayerIndex.One).Buttons.B == ButtonState.Pressed)
                 {
                     Mode = 5;
                     KeyIndex = 0;
@@ -921,7 +930,7 @@ namespace InputRedirection
             DrawString(68, 92, "CPad Down  : " + KeyboardInput[15], Color.White);
             DrawString(68, 100, "CPad Left  : " + KeyboardInput[13], Color.White);
             DrawString(68, 108, "CPad Right : " + KeyboardInput[12], Color.White);
-        
+
 
             DrawString(68, 124, "A          : " + KeyboardInput[0], Color.White);
             DrawString(68, 132, "B          : " + KeyboardInput[1], Color.White);
@@ -963,9 +972,9 @@ namespace InputRedirection
         {
             string result = "None";
 
-            for(int i = 0; i < ButtonNames.Length; i++)
+            for (int i = 0; i < ButtonNames.Length; i++)
             {
-                if((value >> i) == 0x01)
+                if ((value >> i) == 0x01)
                 {
                     result = ButtonNames[i];
                     break;
@@ -1102,37 +1111,34 @@ namespace InputRedirection
 
         private void SendInput()
         {
-            if (socket.Connected)
+            if ((newbuttons != oldbuttons) || (newtouch != oldtouch) || (newcpad != oldcpad))
             {
-                if ((newbuttons != oldbuttons) || (newtouch != oldtouch) || (newcpad != oldcpad))
+                oldbuttons = newbuttons;
+                oldtouch = newtouch;
+                oldcpad = newcpad;
+
+                //Buttons
+                data[0x00] = (byte)(oldbuttons & 0xFF);
+                data[0x01] = (byte)((oldbuttons >> 0x08) & 0xFF);
+                data[0x02] = (byte)((oldbuttons >> 0x10) & 0xFF);
+                data[0x03] = (byte)((oldbuttons >> 0x18) & 0xFF);
+
+                //Touch
+                data[0x04] = (byte)(oldtouch & 0xFF);
+                data[0x05] = (byte)((oldtouch >> 0x08) & 0xFF);
+                data[0x06] = (byte)((oldtouch >> 0x10) & 0xFF);
+                data[0x07] = (byte)((oldtouch >> 0x18) & 0xFF);
+
+                //CPad
+                data[0x08] = (byte)(oldcpad & 0xFF);
+                data[0x09] = (byte)((oldcpad >> 0x08) & 0xFF);
+                data[0x0A] = (byte)((oldcpad >> 0x10) & 0xFF);
+                data[0x0B] = (byte)((oldcpad >> 0x18) & 0xFF);
+
+                CheckConnection();
+                if (Program.Connected)
                 {
-                    oldbuttons = newbuttons;
-                    oldtouch = newtouch;
-                    oldcpad = newcpad;
-
-                    //Buttons
-                    data[0x00] = (byte)(oldbuttons & 0xFF);
-                    data[0x01] = (byte)((oldbuttons >> 0x08) & 0xFF);
-                    data[0x02] = (byte)((oldbuttons >> 0x10) & 0xFF);
-                    data[0x03] = (byte)((oldbuttons >> 0x18) & 0xFF);
-
-                    //Touch
-                    data[0x04] = (byte)(oldtouch & 0xFF);
-                    data[0x05] = (byte)((oldtouch >> 0x08) & 0xFF);
-                    data[0x06] = (byte)((oldtouch >> 0x10) & 0xFF);
-                    data[0x07] = (byte)((oldtouch >> 0x18) & 0xFF);
-
-                    //CPad
-                    data[0x08] = (byte)(oldcpad & 0xFF);
-                    data[0x09] = (byte)((oldcpad >> 0x08) & 0xFF);
-                    data[0x0A] = (byte)((oldcpad >> 0x10) & 0xFF);
-                    data[0x0B] = (byte)((oldcpad >> 0x18) & 0xFF);
-
-                    try
-                    {
-                        socket.Send(data);
-                    }
-                    catch { }
+                    Program.scriptHelper.write(0x10DF20, data, 0x10);
                 }
             }
         }

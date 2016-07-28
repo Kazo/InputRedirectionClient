@@ -1,2 +1,2 @@
 # InputRedirectionClient
-PC client for https://github.com/Kazo/InputRedirection.
+PC client for https://github.com/Kazo/InputRedirection/tree/NTR.
